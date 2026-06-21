@@ -1,7 +1,7 @@
 {
   "name": "pi-impeccable",
   "version": "0.1.0",
-  "description": "Thin Pi extension wrapper for upstream Impeccable commands and non-blocking live mode.",
+  "description": "Run Impeccable skills from Pi without blocking the agent.",
   "type": "module",
   "license": "Apache-2.0",
   "keywords": [
@@ -12,6 +12,7 @@
   ],
   "files": [
     "extensions/",
+    "docs/images/screenshot.jpg",
     "README.md",
     "CHANGELOG.md"
   ],
@@ -21,7 +22,8 @@
   "pi": {
     "extensions": [
       "./extensions/impeccable.ts"
-    ]
+    ],
+    "image": "https://unpkg.com/pi-impeccable/docs/images/screenshot.jpg"
   },
   "dependencies": {
     "impeccable": "*"
