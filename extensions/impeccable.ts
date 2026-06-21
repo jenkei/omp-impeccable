@@ -680,5 +680,8 @@ function helpText() {
 /impeccable live status
 /impeccable live stop
 
+Upstream commands:
+init, document, shape, craft, critique, audit, polish, bolder, quieter, distill, harden, clarify, onboard, animate, colorize, typeset, layout, delight, overdrive, adapt, optimize, extract, pin, unpin, hooks
+
 This extension does not vendor Impeccable. It uses the upstream impeccable package to install/update .agents/skills/impeccable in your project, then wraps live mode so the poller runs in the background.`;
 }

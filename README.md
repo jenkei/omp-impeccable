@@ -6,7 +6,7 @@ Run [Impeccable](https://impeccable.style/) skills from Pi without blocking the 
   <img src="docs/images/screenshot.jpg" alt="Impeccable live mode running in Pi" width="720">
 </p>
 
-`pi-impeccable` is a Pi integration for the incredible [`impeccable`](https://github.com/pbakaus/impeccable) package. It installs or updates the Impeccable skill in your project, then runs Impeccable live mode through Pi in the background.
+`pi-impeccable` is a Pi extension for the incredible [`impeccable`](https://github.com/pbakaus/impeccable) package. It installs or updates the Impeccable skill in your project, then runs Impeccable live mode through Pi in the background.
 
 That means you can keep chatting with the agent while Impeccable watches the browser, queues design feedback, and asks Pi to respond. No long-running `live-poll.mjs` command holds the shell hostage.
 
@@ -38,12 +38,17 @@ Install or update the upstream Impeccable skill:
 /impeccable update               # updates that skill from upstream
 ```
 
-Run Impeccable commands from Pi:
+Run Impeccable skills from Pi. `pi-impeccable` exposes the skills in one command with arguments. Some example commands:
 
 ```text
 /impeccable init
+/impeccable shape new onboarding flow
+/impeccable craft empty dashboard state
 /impeccable audit src/pages/Home.tsx
+/impeccable polish src/components/Header.tsx
 ```
+
+Check [Impeccable docs](https://impeccable.style/docs/) to see the options.
 
 Start the non-blocking live loop:
 
