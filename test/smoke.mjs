@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
-import impeccableExtension, { parseCommandDescriptions, summarizeLiveStatus } from '../extensions/impeccable.ts';
+import impeccableExtension, { parseCommandDescriptions, parseCommandMetadata, summarizeLiveStatus } from '../extensions/impeccable.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -157,6 +157,51 @@ test('argument completions use descriptions from the installed skill', async (t)
 		(await harness.commands.get('impeccable').getArgumentCompletions('in')).find(({ value }) => value === 'install').description,
 		'Install Impeccable skill files into this project',
 	);
+});
+
+test('argument completions prefer installed command metadata', async (t) => {
+	const { project, skillRoot } = makeProject(t);
+	fs.writeFileSync(path.join(skillRoot, 'SKILL.md'), `
+| Command | Category | Description | Reference |
+|---|---|---|---|
+| \`craft [feature]\` | Build | Short table description | [reference/craft.md](reference/craft.md) |
+`);
+	fs.writeFileSync(path.join(skillRoot, 'scripts', 'command-metadata.json'), JSON.stringify({
+		craft: { description: 'Full metadata description with `code` and **emphasis**.' },
+	}));
+
+	const descriptions = parseCommandMetadata(fs.readFileSync(path.join(skillRoot, 'scripts', 'command-metadata.json'), 'utf8'));
+	assert.equal(descriptions.get('craft'), 'Full metadata description with code and emphasis.');
+
+	const harness = loadExtension();
+	await harness.emit('session_start', {}, makeContext(project));
+
+	const [craft] = await harness.commands.get('impeccable').getArgumentCompletions('cr');
+
+	assert.equal(craft.description, 'Full metadata description with code and emphasis.');
+});
+
+test('argument completions include fallback descriptions before skill install', async (t) => {
+	const project = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-impeccable-no-skill-'));
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-impeccable-home-'));
+	const oldHome = process.env.HOME;
+	fs.mkdirSync(path.join(project, '.git'));
+	process.env.HOME = home;
+	t.after(() => {
+		if (oldHome === undefined) delete process.env.HOME;
+		else process.env.HOME = oldHome;
+		fs.rmSync(project, { recursive: true, force: true });
+		fs.rmSync(home, { recursive: true, force: true });
+	});
+
+	const harness = loadExtension();
+	await harness.emit('session_start', {}, makeContext(project));
+
+	const craft = (await harness.commands.get('impeccable').getArgumentCompletions('cr')).find(({ value }) => value === 'craft');
+	const hooks = (await harness.commands.get('impeccable').getArgumentCompletions('ho')).find(({ value }) => value === 'hooks');
+
+	assert.match(craft.description, /confirmed-brief-then-build/);
+	assert.match(hooks.description, /design detector hook/);
 });
 
 test('agent commands are queued as hidden extension messages', async (t) => {
