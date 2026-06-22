@@ -43,9 +43,19 @@
     "typebox": "*"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/*.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "format": "biome check --write .",
+    "format:check": "biome check .",
+    "check": "pnpm typecheck && pnpm format:check && pnpm test",
     "pack:check": "npm pack --dry-run",
-    "release:check": "pnpm test && pnpm pack:check"
+    "release:check": "pnpm check && pnpm pack:check"
   },
-  "packageManager": "pnpm@11.8.0+sha512.c1f5e7c4cb241c8f174b743851d82f42b802324afc8b0f116b96adb15aa06664948dde36960a3ba1079ba5b4b29dd0140135b94b5b5f5263592249d68e555f26"
+  "packageManager": "pnpm@11.8.0+sha512.c1f5e7c4cb241c8f174b743851d82f42b802324afc8b0f116b96adb15aa06664948dde36960a3ba1079ba5b4b29dd0140135b94b5b5f5263592249d68e555f26",
+  "devDependencies": {
+    "@biomejs/biome": "2.5.0",
+    "@types/node": "24.13.2",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9"
+  }
 }
