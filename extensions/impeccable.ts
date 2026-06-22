@@ -10,185 +10,13 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-
-const require = createRequire(import.meta.url);
-
-type Delivery = 'steer' | 'followUp';
-
-type LiveState = {
-  active: boolean;
-  cwd?: string;
-  skillRoot?: string;
-  delivery: Delivery;
-  poll?: ChildProcessByStdio<null, Readable, Readable>;
-  pausedFor?: string;
-  lastEvent?: unknown;
-};
-
-type LiveEventData = {
-  type: string;
-  id?: string;
-  action?: string;
-  _acceptResult?: { carbonize?: boolean };
-  _completionAck?: { ok?: boolean };
-  [key: string]: unknown;
-};
-
-const agentReplyEvents = new Set(['generate', 'steer', 'manual_edit_apply']);
-const agentCommands = [
-  'init',
-  'document',
-  'craft',
-  'shape',
-  'critique',
-  'audit',
-  'polish',
-  'bolder',
-  'quieter',
-  'distill',
-  'harden',
-  'onboard',
-  'animate',
-  'colorize',
-  'typeset',
-  'layout',
-  'delight',
-  'overdrive',
-  'clarify',
-  'adapt',
-  'optimize',
-  'extract',
-  'pin',
-  'unpin',
-  'hooks',
-] as const;
-
-const extensionCommandDescriptions = new Map<string, string>([
-  ['live', 'Start Impeccable live mode in the background'],
-  ['status', 'Show Impeccable live server/session status'],
-  ['stop', 'Stop Impeccable live mode and polling'],
-  ['install', 'Install Impeccable skill files into this project'],
-  ['update', 'Update installed Impeccable skill files'],
-]);
-
-const fallbackAgentCommandDescriptions = new Map<string, string>([
-  [
-    'craft',
-    'Full confirmed-brief-then-build flow. Runs multi-round shape discovery first, resolves visual probe and north-star mock gates when available, then builds and visually iterates. Use when building a new feature end-to-end.',
-  ],
-  [
-    'init',
-    'Sets up a project for Impeccable. Runs a discovery interview when context is missing, writes PRODUCT.md, offers DESIGN.md when code exists, pre-configures live mode, and recommends next commands.',
-  ],
-  [
-    'document',
-    'Generate a DESIGN.md file that captures the current visual design system: colors, typography, spacing, radii, and component patterns.',
-  ],
-  [
-    'extract',
-    'Pull reusable patterns, components, and design tokens into the design system. Use when drift across the codebase should be consolidated.',
-  ],
-  [
-    'adapt',
-    'Adapt designs to work across different screen sizes, devices, contexts, or platforms. Implements breakpoints, fluid layouts, and touch targets.',
-  ],
-  [
-    'animate',
-    'Review a feature and enhance it with purposeful animations, micro-interactions, and motion effects that improve usability and delight.',
-  ],
-  [
-    'audit',
-    'Run technical quality checks across accessibility, performance, theming, responsive design, and anti-patterns with severity-rated findings.',
-  ],
-  [
-    'bolder',
-    'Amplify safe or boring designs to make them more visually interesting and stimulating while maintaining usability.',
-  ],
-  [
-    'clarify',
-    'Improve unclear UX copy, error messages, microcopy, labels, and instructions so interfaces are easier to understand.',
-  ],
-  [
-    'colorize',
-    'Add strategic color to monochromatic or flat UIs, making interfaces more engaging and expressive.',
-  ],
-  [
-    'critique',
-    'Evaluate design from a UX perspective: hierarchy, IA, emotional resonance, cognitive load, scoring, anti-patterns, and actionable feedback.',
-  ],
-  [
-    'delight',
-    'Add moments of joy, personality, and unexpected touches that make interfaces memorable and enjoyable to use.',
-  ],
-  [
-    'distill',
-    'Strip designs to their essence by removing unnecessary complexity and noise.',
-  ],
-  [
-    'harden',
-    'Make interfaces production-ready: error handling, i18n, text overflow, edge cases, and resilience under real-world data.',
-  ],
-  [
-    'onboard',
-    'Design onboarding flows, first-run experiences, and empty states that guide new users to value.',
-  ],
-  [
-    'layout',
-    'Improve layout, spacing, and visual rhythm. Fix monotonous grids, inconsistent spacing, weak hierarchy, and alignment issues.',
-  ],
-  [
-    'optimize',
-    'Diagnose and fix UI performance across loading speed, rendering, animations, images, and bundle size.',
-  ],
-  [
-    'overdrive',
-    'Push interfaces past conventional limits with technically ambitious implementations such as shaders, spring physics, and scroll-driven reveals.',
-  ],
-  [
-    'polish',
-    'Perform a final quality pass fixing alignment, spacing, consistency, and micro-detail issues before shipping.',
-  ],
-  [
-    'quieter',
-    'Tone down visually aggressive or overstimulating designs, reducing intensity while preserving quality.',
-  ],
-  [
-    'shape',
-    'Plan UX and UI before code with discovery, visual probes when available, and a user-confirmed design brief.',
-  ],
-  [
-    'typeset',
-    'Improve typography by fixing font choices, hierarchy, sizing, weight, and readability so text feels intentional.',
-  ],
-  [
-    'pin',
-    'Create a standalone shortcut so a command can invoke the matching Impeccable command directly.',
-  ],
-  ['unpin', 'Remove a standalone Impeccable command shortcut.'],
-  ['hooks', 'Manage the Impeccable design detector hook for this project.'],
-]);
-
-let transientStatusTimer: ReturnType<typeof setTimeout> | undefined;
-
-function clearTransientStatus(ctx?: ExtensionContext) {
-  if (transientStatusTimer) clearTimeout(transientStatusTimer);
-  transientStatusTimer = undefined;
-  ctx?.ui.setStatus('impeccable-transient', undefined);
-}
-
-function showTransientStatus(ctx: ExtensionContext, text: string) {
-  if (!ctx.hasUI) return;
-  clearTransientStatus(ctx);
-  ctx.ui.setStatus(
-    'impeccable-transient',
-    ctx.ui.theme.fg('syntaxNumber', `✦ impeccable ${text}`),
-  );
-  transientStatusTimer = setTimeout(() => {
-    transientStatusTimer = undefined;
-    ctx.ui.setStatus('impeccable-transient', undefined);
-  }, 3500);
-  transientStatusTimer.unref?.();
-}
+import {
+  agentCommands,
+  extensionCommandDescriptions,
+  fallbackAgentCommandDescriptions,
+  helpText,
+  unknownCommandText,
+} from './ui-helpers.ts';
 
 export default function impeccableExtension(pi: ExtensionAPI) {
   let ctxRef: ExtensionContext | undefined;
@@ -695,153 +523,6 @@ function pathContract(skillRoot: string) {
   ].join('\n');
 }
 
-function locateSkill(cwd: string) {
-  const root = projectRoot(cwd);
-  const candidates = [
-    join(root, '.agents', 'skills', 'impeccable'),
-    join(cwd, '.agents', 'skills', 'impeccable'),
-    join(homedir(), '.agents', 'skills', 'impeccable'),
-  ];
-  return candidates.find(
-    (dir) =>
-      existsSync(join(dir, 'SKILL.md')) && existsSync(join(dir, 'scripts')),
-  );
-}
-
-function projectRoot(cwd: string) {
-  let dir = resolve(cwd);
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, '.git'))) return dir;
-    dir = dirname(dir);
-  }
-  return resolve(cwd);
-}
-
-function script(skillRoot: string, name: string) {
-  return join(skillRoot, 'scripts', name);
-}
-
-function resolveImpeccableCli() {
-  try {
-    let current = dirname(require.resolve('impeccable'));
-    while (current !== dirname(current)) {
-      const candidate = join(current, 'package.json');
-      if (existsSync(candidate)) {
-        const cli = join(current, 'cli', 'bin', 'cli.js');
-        if (existsSync(cli)) return cli;
-      }
-      current = dirname(current);
-    }
-  } catch {
-    /* dependency absent in local dev; use npx */
-  }
-  return null;
-}
-
-function runImpeccable(
-  args: string[],
-  cwd: string,
-  signal?: AbortSignal,
-  timeoutMs = 120_000,
-) {
-  const cli = resolveImpeccableCli();
-  return cli
-    ? runProcess(process.execPath, [cli, ...args], cwd, signal, timeoutMs)
-    : runProcess(
-        'npx',
-        ['-y', 'impeccable@latest', ...args],
-        cwd,
-        signal,
-        timeoutMs,
-      );
-}
-
-function sendExtensionPrompt(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext | undefined,
-  text: string,
-  delivery: Delivery,
-) {
-  const options = ctx?.isIdle()
-    ? { triggerTurn: true }
-    : { triggerTurn: true, deliverAs: delivery };
-  pi.sendMessage(
-    { customType: 'impeccable-command', content: text, display: false },
-    options,
-  );
-}
-
-function sendLiveEvent(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext | undefined,
-  text: string,
-  event: LiveEventData,
-  delivery: Delivery,
-) {
-  ctx?.ui.notify(
-    `Impeccable live: ${event.type}${event.action ? ` ${event.action}` : ''}`,
-    'info',
-  );
-  const options = ctx?.isIdle()
-    ? { triggerTurn: true }
-    : { triggerTurn: true, deliverAs: delivery };
-  pi.sendMessage(
-    { customType: 'impeccable-live', content: text, display: false },
-    options,
-  );
-}
-
-function notifyOrDisplay(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  content: string,
-  type: 'info' | 'warning' | 'error' = 'info',
-) {
-  if (ctx.hasUI) ctx.ui.notify(content, type);
-  else display(pi, content);
-}
-
-function display(pi: ExtensionAPI, content: string) {
-  pi.sendMessage({ customType: 'impeccable', content, display: true });
-}
-
-function killPoll(live: LiveState) {
-  if (!live.poll) return;
-  live.poll.kill('SIGTERM');
-  live.poll = undefined;
-}
-
-function startIndicator(live: LiveState, ctx: ExtensionContext) {
-  renderIndicator(live, ctx);
-}
-
-function stopIndicator(_live: LiveState, ctx?: ExtensionContext) {
-  ctx?.ui.setStatus('impeccable', undefined);
-}
-
-function renderIndicator(live: LiveState, ctx: ExtensionContext) {
-  if (!ctx.hasUI) return;
-  if (!live.active) return stopIndicator(live, ctx);
-  const label = (state: 'live' | 'event' | 'error') => {
-    const color =
-      state === 'live'
-        ? 'syntaxNumber'
-        : state === 'event'
-          ? 'warning'
-          : 'error';
-    return ctx.ui.theme.fg(color, `✦ impeccable ${state}`);
-  };
-  if (live.pausedFor === 'poll-error' || live.pausedFor === 'parse-error') {
-    ctx.ui.setStatus('impeccable', label('error'));
-    return;
-  }
-  if (live.pausedFor) {
-    ctx.ui.setStatus('impeccable', label('event'));
-    return;
-  }
-  ctx.ui.setStatus('impeccable', label('live'));
-}
-
 function isForegroundLivePoll(command: string) {
   if (command.includes('--reply')) return false;
   return (
@@ -906,91 +587,6 @@ export function summarizeLiveStatus(output: string) {
         : 'session';
   const more = sessions.length > 1 ? ` · +${sessions.length - 1} more` : '';
   return `Impeccable live: ${server} · ${phase} · ${target}${more}`;
-}
-
-function parseJson(output: string): unknown {
-  const text = output.trim();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    /* try extracting a JSON object below */
-  }
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end > start) {
-    try {
-      return JSON.parse(text.slice(start, end + 1));
-    } catch {
-      /* not a JSON object */
-    }
-  }
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      return JSON.parse(lines[i]);
-    } catch {
-      /* try previous line */
-    }
-  }
-  return null;
-}
-
-function asLiveEvent(value: unknown): LiveEventData | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const event = value as { type?: unknown };
-  if (typeof event.type !== 'string') return undefined;
-  return value as LiveEventData;
-}
-
-function runNode(
-  scriptPath: string,
-  args: string[],
-  cwd: string,
-  signal?: AbortSignal,
-  timeoutMs = 30_000,
-) {
-  return runProcess(
-    process.execPath,
-    [scriptPath, ...args],
-    cwd,
-    signal,
-    timeoutMs,
-  );
-}
-
-function runProcess(
-  command: string,
-  args: string[],
-  cwd: string,
-  signal?: AbortSignal,
-  timeoutMs = 30_000,
-) {
-  return new Promise<{ stdout: string; stderr: string; code: number | null }>(
-    (resolvePromise) => {
-      const child = spawn(command, args, {
-        cwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stdout = '';
-      let stderr = '';
-      const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-      const abort = () => child.kill('SIGTERM');
-      signal?.addEventListener('abort', abort, { once: true });
-      child.stdout.on('data', (chunk) => (stdout += String(chunk)));
-      child.stderr.on('data', (chunk) => (stderr += String(chunk)));
-      child.on('error', (error) => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', abort);
-        resolvePromise({ stdout, stderr: stderr || error.message, code: 1 });
-      });
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', abort);
-        resolvePromise({ stdout, stderr, code });
-      });
-    },
-  );
 }
 
 function isAgentCommand(command: string) {
@@ -1063,21 +659,283 @@ function cleanDescription(description: string) {
     .trim();
 }
 
-function unknownCommandText(command: string) {
-  return `Unknown Impeccable command: ${command}. Try /impeccable live.`;
+let transientStatusTimer: ReturnType<typeof setTimeout> | undefined;
+
+function sendExtensionPrompt(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext | undefined,
+  text: string,
+  delivery: Delivery,
+) {
+  const options = ctx?.isIdle()
+    ? { triggerTurn: true }
+    : { triggerTurn: true, deliverAs: delivery };
+  pi.sendMessage(
+    { customType: 'impeccable-command', content: text, display: false },
+    options,
+  );
 }
 
-function helpText() {
-  return `Usage:
-/impeccable <command> [target]
-/impeccable install
-/impeccable update
-/impeccable live [--delivery=steer|followUp]
-/impeccable live status
-/impeccable live stop
-
-Upstream commands:
-init, document, shape, craft, critique, audit, polish, bolder, quieter, distill, harden, clarify, onboard, animate, colorize, typeset, layout, delight, overdrive, adapt, optimize, extract, pin, unpin, hooks
-
-This extension does not vendor Impeccable. It uses the upstream impeccable package to install/update .agents/skills/impeccable in your project, then wraps live mode so the poller runs in the background.`;
+function sendLiveEvent(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext | undefined,
+  text: string,
+  event: LiveEventData,
+  delivery: Delivery,
+) {
+  ctx?.ui.notify(
+    `Impeccable live: ${event.type}${event.action ? ` ${event.action}` : ''}`,
+    'info',
+  );
+  const options = ctx?.isIdle()
+    ? { triggerTurn: true }
+    : { triggerTurn: true, deliverAs: delivery };
+  pi.sendMessage(
+    { customType: 'impeccable-live', content: text, display: false },
+    options,
+  );
 }
+
+function notifyOrDisplay(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  content: string,
+  type: 'info' | 'warning' | 'error' = 'info',
+) {
+  if (ctx.hasUI) ctx.ui.notify(content, type);
+  else display(pi, content);
+}
+
+function display(pi: ExtensionAPI, content: string) {
+  pi.sendMessage({ customType: 'impeccable', content, display: true });
+}
+
+function clearTransientStatus(ctx?: ExtensionContext) {
+  if (transientStatusTimer) clearTimeout(transientStatusTimer);
+  transientStatusTimer = undefined;
+  ctx?.ui.setStatus('impeccable-transient', undefined);
+}
+
+function showTransientStatus(ctx: ExtensionContext, text: string) {
+  if (!ctx.hasUI) return;
+  clearTransientStatus(ctx);
+  ctx.ui.setStatus(
+    'impeccable-transient',
+    ctx.ui.theme.fg('syntaxNumber', `✦ impeccable ${text}`),
+  );
+  transientStatusTimer = setTimeout(() => {
+    transientStatusTimer = undefined;
+    ctx.ui.setStatus('impeccable-transient', undefined);
+  }, 3500);
+  transientStatusTimer.unref?.();
+}
+
+function killPoll(live: LiveState) {
+  if (!live.poll) return;
+  live.poll.kill('SIGTERM');
+  live.poll = undefined;
+}
+
+function startIndicator(live: LiveState, ctx: ExtensionContext) {
+  renderIndicator(live, ctx);
+}
+
+function stopIndicator(_live: LiveState, ctx?: ExtensionContext) {
+  ctx?.ui.setStatus('impeccable', undefined);
+}
+
+function renderIndicator(live: LiveState, ctx: ExtensionContext) {
+  if (!ctx.hasUI) return;
+  if (!live.active) return stopIndicator(live, ctx);
+  const label = (state: 'live' | 'event' | 'error') => {
+    const color =
+      state === 'live'
+        ? 'syntaxNumber'
+        : state === 'event'
+          ? 'warning'
+          : 'error';
+    return ctx.ui.theme.fg(color, `✦ impeccable ${state}`);
+  };
+  if (live.pausedFor === 'poll-error' || live.pausedFor === 'parse-error') {
+    ctx.ui.setStatus('impeccable', label('error'));
+    return;
+  }
+  if (live.pausedFor) {
+    ctx.ui.setStatus('impeccable', label('event'));
+    return;
+  }
+  ctx.ui.setStatus('impeccable', label('live'));
+}
+
+// Files, processes, and JSON.
+function locateSkill(cwd: string) {
+  const root = projectRoot(cwd);
+  const candidates = [
+    join(root, '.agents', 'skills', 'impeccable'),
+    join(cwd, '.agents', 'skills', 'impeccable'),
+    join(homedir(), '.agents', 'skills', 'impeccable'),
+  ];
+  return candidates.find(
+    (dir) =>
+      existsSync(join(dir, 'SKILL.md')) && existsSync(join(dir, 'scripts')),
+  );
+}
+
+function projectRoot(cwd: string) {
+  let dir = resolve(cwd);
+  while (dir !== dirname(dir)) {
+    if (existsSync(join(dir, '.git'))) return dir;
+    dir = dirname(dir);
+  }
+  return resolve(cwd);
+}
+
+function script(skillRoot: string, name: string) {
+  return join(skillRoot, 'scripts', name);
+}
+
+function resolveImpeccableCli() {
+  try {
+    let current = dirname(require.resolve('impeccable'));
+    while (current !== dirname(current)) {
+      const candidate = join(current, 'package.json');
+      if (existsSync(candidate)) {
+        const cli = join(current, 'cli', 'bin', 'cli.js');
+        if (existsSync(cli)) return cli;
+      }
+      current = dirname(current);
+    }
+  } catch {
+    /* dependency absent in local dev; use npx */
+  }
+  return null;
+}
+
+function runImpeccable(
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+  timeoutMs = 120_000,
+) {
+  const cli = resolveImpeccableCli();
+  return cli
+    ? runProcess(process.execPath, [cli, ...args], cwd, signal, timeoutMs)
+    : runProcess(
+        'npx',
+        ['-y', 'impeccable@latest', ...args],
+        cwd,
+        signal,
+        timeoutMs,
+      );
+}
+
+function runNode(
+  scriptPath: string,
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+  timeoutMs = 30_000,
+) {
+  return runProcess(
+    process.execPath,
+    [scriptPath, ...args],
+    cwd,
+    signal,
+    timeoutMs,
+  );
+}
+
+function runProcess(
+  command: string,
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+  timeoutMs = 30_000,
+) {
+  return new Promise<{ stdout: string; stderr: string; code: number | null }>(
+    (resolvePromise) => {
+      const child = spawn(command, args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
+      const abort = () => child.kill('SIGTERM');
+      signal?.addEventListener('abort', abort, { once: true });
+      child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+      child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+      child.on('error', (error) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        resolvePromise({ stdout, stderr: stderr || error.message, code: 1 });
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        resolvePromise({ stdout, stderr, code });
+      });
+    },
+  );
+}
+
+function parseJson(output: string): unknown {
+  const text = output.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    /* try extracting a JSON object below */
+  }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      /* not a JSON object */
+    }
+  }
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      /* try previous line */
+    }
+  }
+  return null;
+}
+
+function asLiveEvent(value: unknown): LiveEventData | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const event = value as { type?: unknown };
+  if (typeof event.type !== 'string') return undefined;
+  return value as LiveEventData;
+}
+
+// Types and static data.
+const require = createRequire(import.meta.url);
+
+type Delivery = 'steer' | 'followUp';
+
+type LiveState = {
+  active: boolean;
+  cwd?: string;
+  skillRoot?: string;
+  delivery: Delivery;
+  poll?: ChildProcessByStdio<null, Readable, Readable>;
+  pausedFor?: string;
+  lastEvent?: unknown;
+};
+
+type LiveEventData = {
+  type: string;
+  id?: string;
+  action?: string;
+  _acceptResult?: { carbonize?: boolean };
+  _completionAck?: { ok?: boolean };
+  [key: string]: unknown;
+};
+
+const agentReplyEvents = new Set(['generate', 'steer', 'manual_edit_apply']);
