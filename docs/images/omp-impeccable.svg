@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="810" viewBox="0 0 1440 810" role="img" aria-labelledby="omp-title omp-desc">
+  <title id="omp-title">omp-impeccable</title>
+  <desc id="omp-desc">Native OMP plugin for Impeccable. Live mode runs in the background.</desc>
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="810" fill="#0a0d18"/>
+
+  <!-- Status row: mirrors the terminal status text emitted by OMP. -->
+  <text class="mono" x="140" y="272" font-size="26" font-weight="500" fill="#94a3b8" letter-spacing="0.01em">✦ impeccable live</text>
+
+  <!-- Wordmark (hero) -->
+  <text class="sans" x="140" y="440" font-size="96" font-weight="700" fill="#f1f5f9" letter-spacing="-0.035em">omp-impeccable</text>
+
+  <!-- Tagline -->
+  <text class="sans" x="140" y="518" font-size="32" font-weight="400" fill="#cbd5e1" letter-spacing="-0.005em">Native OMP plugin for Impeccable.</text>
+  <text class="sans" x="140" y="566" font-size="32" font-weight="400" fill="#cbd5e1" letter-spacing="-0.005em">Live mode runs in the background.</text>
+
+  <!-- Structural anchor: thin baseline rule + the slash command (what users type) on the left,
+       the install command (how to get it) on the right. Frames the composition with two practical
+       lines of context, mirroring the cause-and-effect of the plugin itself. -->
+  <line x1="140" y1="690" x2="1300" y2="690" stroke="#1e293b" stroke-width="1"/>
+  <text class="mono" x="140" y="732" font-size="22" font-weight="500" fill="#94a3b8" letter-spacing="0.01em">/impeccable live</text>
+  <text class="mono" x="1300" y="732" text-anchor="end" font-size="22" font-weight="500" fill="#94a3b8" letter-spacing="0.01em">omp plugin install omp-impeccable</text>
+</svg>

@@ -21,9 +21,6 @@ export const agentCommands = [
   'adapt',
   'optimize',
   'extract',
-  'pin',
-  'unpin',
-  'hooks',
 ] as const;
 
 export const extensionCommandDescriptions = new Map<string, string>([
@@ -32,6 +29,12 @@ export const extensionCommandDescriptions = new Map<string, string>([
   ['stop', 'Stop Impeccable live mode and polling'],
   ['install', 'Install Impeccable skill files into this project'],
   ['update', 'Update installed Impeccable skill files'],
+  ['pin', 'Create an OMP slash-command shortcut for an Impeccable command'],
+  ['unpin', 'Remove an OMP slash-command shortcut for an Impeccable command'],
+  [
+    'hooks',
+    'Explain OMP-native live mode; upstream hook manifests are not installed',
+  ],
 ]);
 
 export const fallbackAgentCommandDescriptions = new Map<string, string>([
@@ -123,12 +126,6 @@ export const fallbackAgentCommandDescriptions = new Map<string, string>([
     'typeset',
     'Improve typography by fixing font choices, hierarchy, sizing, weight, and readability so text feels intentional.',
   ],
-  [
-    'pin',
-    'Create a standalone shortcut so a command can invoke the matching Impeccable command directly.',
-  ],
-  ['unpin', 'Remove a standalone Impeccable command shortcut.'],
-  ['hooks', 'Manage the Impeccable design detector hook for this project.'],
 ]);
 
 export function unknownCommandText(command: string) {
@@ -143,9 +140,15 @@ export function helpText() {
 /impeccable live [--delivery=steer|followUp]
 /impeccable live status
 /impeccable live stop
+/impeccable pin <upstream-command>
+/impeccable unpin <upstream-command>
+/impeccable hooks
 
-Upstream commands:
-init, document, shape, craft, critique, audit, polish, bolder, quieter, distill, harden, clarify, onboard, animate, colorize, typeset, layout, delight, overdrive, adapt, optimize, extract, pin, unpin, hooks
+OMP commands:
+live, status, stop, install, update, pin, unpin, hooks
 
-This extension does not vendor Impeccable. It uses the upstream impeccable package to install/update .agents/skills/impeccable in your project, then wraps live mode so the poller runs in the background.`;
+Upstream Impeccable commands:
+init, document, shape, craft, critique, audit, polish, bolder, quieter, distill, harden, clarify, onboard, animate, colorize, typeset, layout, delight, overdrive, adapt, optimize, extract
+
+This extension does not vendor Impeccable. It stages the upstream Codex skill, stores the managed copy at .omp/skills/impeccable in your project, then wraps live mode so the poller runs in the background.`;
 }

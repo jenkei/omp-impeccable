@@ -1,15 +1,22 @@
 import { type ChildProcessByStdio, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, extname, join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { StringEnum } from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
   ExtensionContext,
-} from '@earendil-works/pi-coding-agent';
-import { Type } from 'typebox';
+} from '@oh-my-pi/pi-coding-agent/extensibility/extensions/types';
 import {
   agentCommands,
   extensionCommandDescriptions,
@@ -19,8 +26,10 @@ import {
 } from './ui-helpers.ts';
 
 export default function impeccableExtension(pi: ExtensionAPI) {
+  const { z } = pi.zod;
   let ctxRef: ExtensionContext | undefined;
   const live: LiveState = { active: false, delivery: 'steer' };
+  const pinnedCommandNames = new Set<string>();
 
   pi.on('resources_discover', (event) => {
     const skillRoot = locateSkill(event.cwd);
@@ -29,6 +38,7 @@ export default function impeccableExtension(pi: ExtensionAPI) {
 
   pi.on('session_start', (_event, ctx) => {
     ctxRef = ctx;
+    registerPinnedCommands(pi, pinnedCommandNames, ctx.cwd);
     if (live.active) startIndicator(live, ctx);
   });
 
@@ -56,14 +66,13 @@ export default function impeccableExtension(pi: ExtensionAPI) {
   });
 
   pi.on('input', async (event, ctx) => {
-    if (event.source === 'extension') return { action: 'continue' };
+    if (event.source === 'extension') return;
     if (
       !/^\s*(stop|exit)\s+(impeccable\s+)?live(\s+mode)?\s*$/i.test(event.text)
-    ) {
-      return { action: 'continue' };
-    }
+    )
+      return;
     await stopLive(pi, live, ctx);
-    return { action: 'handled' };
+    return { handled: true };
   });
 
   pi.on('tool_call', (event, ctx) => {
@@ -85,7 +94,7 @@ export default function impeccableExtension(pi: ExtensionAPI) {
     return {
       block: true,
       reason:
-        'Impeccable live polling is managed by the pi-impeccable extension in the background. Do not run live-poll.mjs as a foreground bash tool.',
+        'Impeccable live polling is managed by the omp-impeccable extension in the background. Do not run live-poll.mjs as a foreground bash tool.',
     };
   });
 
@@ -112,6 +121,11 @@ export default function impeccableExtension(pi: ExtensionAPI) {
       if (head === 'stop') return stopLive(pi, live, ctx);
       if (head === 'status') return showLiveStatus(pi, live, ctx);
 
+      if (head === 'pin')
+        return pinCommand(pi, pinnedCommandNames, ctx, tokens.slice(1));
+      if (head === 'unpin') return unpinCommand(pi, ctx, tokens.slice(1));
+      if (head === 'hooks') return explainHooksCommand(pi, ctx);
+
       if (!isAgentCommand(head))
         return notifyOrDisplay(pi, ctx, unknownCommandText(head), 'warning');
       showTransientStatus(ctx, `${head} queued`);
@@ -121,32 +135,29 @@ export default function impeccableExtension(pi: ExtensionAPI) {
     },
   });
 
+  registerPinnedCommands(pi, pinnedCommandNames, process.cwd(), {
+    checkConflicts: false,
+  });
+
   pi.registerTool({
     name: 'impeccable_live_reply',
     label: 'Impeccable Live Reply',
     description:
       'Reply to an Impeccable live event after handling generate, steer, or manual Apply work.',
-    promptSnippet:
-      'Reply to the current Impeccable live browser event and resume background polling.',
-    promptGuidelines: [
-      'Use impeccable_live_reply after handling an Impeccable live generate, steer, or manual_edit_apply event; do not reply with bash.',
-    ],
-    parameters: Type.Object({
-      id: Type.String({ description: 'Live event id.' }),
-      status: StringEnum(['done', 'partial', 'steer_done', 'error'] as const),
-      file: Type.Optional(
-        Type.String({
-          description: 'Changed file path, relative to project root.',
-        }),
-      ),
-      message: Type.Optional(
-        Type.String({
-          description: 'Short browser/user-facing note or error reason.',
-        }),
-      ),
-      data: Type.Optional(
-        Type.Any({ description: 'Manual Apply JSON payload.' }),
-      ),
+    parameters: z.object({
+      id: z.string().describe('Live event id.'),
+      status: z
+        .enum(['done', 'partial', 'steer_done', 'error'])
+        .describe('Live reply status.'),
+      file: z
+        .string()
+        .describe('Changed file path, relative to project root.')
+        .optional(),
+      message: z
+        .string()
+        .describe('Short browser/user-facing note or error reason.')
+        .optional(),
+      data: z.any().describe('Manual Apply JSON payload.').optional(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const skillRoot = live.skillRoot ?? locateSkill(ctx.cwd);
@@ -192,18 +203,12 @@ export default function impeccableExtension(pi: ExtensionAPI) {
     label: 'Impeccable Live Complete',
     description:
       'Mark Impeccable live accept/carbonize cleanup complete and resume background polling.',
-    promptSnippet:
-      'Mark Impeccable live cleanup complete after carbonize cleanup.',
-    promptGuidelines: [
-      'Use impeccable_live_complete after cleaning an Impeccable live carbonize accept block; do not poll again before completing it.',
-    ],
-    parameters: Type.Object({
-      id: Type.String({ description: 'Live event/session id.' }),
-      discarded: Type.Optional(
-        Type.Boolean({
-          description: 'Set only for discard completion recovery.',
-        }),
-      ),
+    parameters: z.object({
+      id: z.string().describe('Live event/session id.'),
+      discarded: z
+        .boolean()
+        .describe('Set only for discard completion recovery.')
+        .optional(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const skillRoot = live.skillRoot ?? locateSkill(ctx.cwd);
@@ -368,53 +373,46 @@ async function installOrUpdate(
   action: 'install' | 'update',
 ) {
   showTransientStatus(ctx, `${action} started`);
-  const args =
-    action === 'install'
-      ? ['install', '--providers=codex', '--scope=project', '-y', '--no-hooks']
-      : ['update', '-y', '--no-hooks'];
-  const result = await runImpeccable(args, ctx.cwd, undefined, 120_000);
+  const installed = await installProjectOmpSkill(ctx.cwd);
+
   clearTransientStatus(ctx);
   if (live.active) renderIndicator(live, ctx);
   else stopIndicator(live, ctx);
-  if (result.code !== 0)
-    return notifyOrDisplay(
-      pi,
-      ctx,
-      result.stderr || result.stdout || `impeccable ${action} failed`,
-      'error',
-    );
+  if (installed.result.code !== 0 || !installed.skillRoot) {
+    const message =
+      installed.result.code !== 0
+        ? installed.result.stderr ||
+          installed.result.stdout ||
+          `impeccable ${action} failed`
+        : `.omp/skills/impeccable was not found after staging the upstream Codex install`;
+    return notifyOrDisplay(pi, ctx, message, 'error');
+  }
   notifyOrDisplay(pi, ctx, `Impeccable ${action} complete.`, 'info');
 }
 
 async function ensureSkill(pi: ExtensionAPI, ctx: ExtensionContext) {
-  const existing = locateSkill(ctx.cwd);
-  if (existing) return existing;
+  const projectSkill = ensureProjectOmpSkill(ctx.cwd);
+  if (projectSkill) return projectSkill;
   display(
     pi,
-    'Impeccable is not installed for this project. Installing latest .agents skill now...',
+    'Impeccable is not installed for this project. Installing latest upstream Codex skill into .omp/skills/impeccable...',
   );
-  const result = await runImpeccable(
-    ['install', '--providers=codex', '--scope=project', '-y', '--no-hooks'],
-    ctx.cwd,
-    undefined,
-    120_000,
-  );
-  if (result.code !== 0) {
+  const installed = await installProjectOmpSkill(ctx.cwd);
+  if (installed.result.code !== 0) {
     display(
       pi,
-      `Impeccable install failed:\n\n${result.stderr || result.stdout}`,
+      `Impeccable install failed:\n\n${installed.result.stderr || installed.result.stdout}`,
     );
     return null;
   }
-  const installed = locateSkill(ctx.cwd);
-  if (!installed) {
+  if (!installed.skillRoot) {
     display(
       pi,
-      `Impeccable install ran, but .agents/skills/impeccable was not found. Output:\n\n${result.stdout}`,
+      `Impeccable install ran, but .omp/skills/impeccable was not found after staging the upstream Codex install. Output:\n\n${installed.result.stdout}`,
     );
     return null;
   }
-  return installed;
+  return installed.skillRoot;
 }
 
 function startPoll(pi: ExtensionAPI, live: LiveState, ctx: ExtensionContext) {
@@ -522,9 +520,271 @@ function liveEventPrompt(
     .join('\n\n');
 }
 
+async function pinCommand(
+  pi: ExtensionAPI,
+  pinnedCommandNames: Set<string>,
+  ctx: ExtensionContext,
+  tokens: string[],
+) {
+  const command = tokens[0] ?? '';
+  if (!command) {
+    return display(pi, 'Usage: /impeccable pin <upstream-command>');
+  }
+  if (!isSafeCommandName(command) || !isAgentCommand(command)) {
+    return notifyOrDisplay(
+      pi,
+      ctx,
+      `Cannot pin ${command || 'empty command'}; choose an upstream Impeccable command.`,
+      'warning',
+    );
+  }
+  const file = pinnedCommandPath(ctx.cwd, command);
+  if (hasCommandFileConflict(ctx.cwd, command)) {
+    return notifyOrDisplay(
+      pi,
+      ctx,
+      `Cannot overwrite existing OMP command file: ${file}`,
+      'warning',
+    );
+  }
+  if (hasCommandConflict(pi, ctx.cwd, command, pinnedCommandNames)) {
+    return notifyOrDisplay(
+      pi,
+      ctx,
+      `Cannot pin /${command}; an OMP slash command with that name already exists.`,
+      'warning',
+    );
+  }
+
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, pinnedCommandContent(command));
+  registerPinnedCommand(pi, pinnedCommandNames, command);
+  return notifyOrDisplay(
+    pi,
+    ctx,
+    `Pinned /${command} to /impeccable ${command} in .omp/commands/${command}.md.`,
+  );
+}
+
+function unpinCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  tokens: string[],
+) {
+  const command = tokens[0] ?? '';
+  if (!command) {
+    return display(pi, 'Usage: /impeccable unpin <upstream-command>');
+  }
+  if (!isSafeCommandName(command)) {
+    return notifyOrDisplay(
+      pi,
+      ctx,
+      `Invalid pinned command: ${command}`,
+      'warning',
+    );
+  }
+
+  const file = pinnedCommandPath(ctx.cwd, command);
+  if (!existsSync(file)) {
+    return notifyOrDisplay(pi, ctx, `/${command} is not pinned.`, 'info');
+  }
+  if (!isPinnedCommandFile(file, command)) {
+    return notifyOrDisplay(
+      pi,
+      ctx,
+      `Refusing to remove non-omp-impeccable command file: ${file}`,
+      'warning',
+    );
+  }
+
+  rmSync(file);
+  return notifyOrDisplay(
+    pi,
+    ctx,
+    `Removed .omp/commands/${command}.md. Reload OMP to remove /${command} from autocomplete.`,
+  );
+}
+
+function explainHooksCommand(pi: ExtensionAPI, ctx: ExtensionContext) {
+  return notifyOrDisplay(
+    pi,
+    ctx,
+    'The upstream /impeccable hooks command installs provider-specific hook manifests. omp-impeccable does not install those; use /impeccable live for OMP-native design feedback.',
+    'info',
+  );
+}
+
+function registerPinnedCommands(
+  pi: ExtensionAPI,
+  pinnedCommandNames: Set<string>,
+  cwd: string,
+  { checkConflicts = true }: { checkConflicts?: boolean } = {},
+) {
+  for (const command of pinnedCommands(cwd)) {
+    if (
+      checkConflicts &&
+      hasCommandConflict(pi, cwd, command, pinnedCommandNames)
+    )
+      continue;
+    registerPinnedCommand(pi, pinnedCommandNames, command);
+  }
+}
+
+function registerPinnedCommand(
+  pi: ExtensionAPI,
+  pinnedCommandNames: Set<string>,
+  command: string,
+) {
+  if (pinnedCommandNames.has(command)) return;
+  pinnedCommandNames.add(command);
+  pi.registerCommand(command, {
+    description: pinnedCommandDescription(command),
+    handler: async (args, ctx) => {
+      if (!isPinnedCommand(ctx.cwd, command)) {
+        return notifyOrDisplay(
+          pi,
+          ctx,
+          `/${command} is not pinned in this project. Run /impeccable pin ${command} to restore it.`,
+          'warning',
+        );
+      }
+      showTransientStatus(ctx, `${command} queued`);
+      const skillRoot = await ensureSkill(pi, ctx);
+      if (!skillRoot) return;
+      const invocation = [command, args.trim()].filter(Boolean).join(' ');
+      sendExtensionPrompt(
+        pi,
+        ctx,
+        commandPrompt(invocation, skillRoot),
+        'followUp',
+      );
+    },
+  });
+}
+
+function pinnedCommandDescription(command: string) {
+  return `Run /impeccable ${command} through omp-impeccable`;
+}
+
+function pinnedCommands(cwd: string) {
+  const commandsDir = join(projectRoot(cwd), '.omp', 'commands');
+  try {
+    return readdirSync(commandsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => entry.name.slice(0, -'.md'.length))
+      .filter(
+        (command) =>
+          isSafeCommandName(command) &&
+          isPinnedCommandFile(join(commandsDir, `${command}.md`), command),
+      );
+  } catch {
+    return [];
+  }
+}
+
+function hasCommandConflict(
+  pi: ExtensionAPI,
+  cwd: string,
+  command: string,
+  pinnedCommandNames: ReadonlySet<string>,
+) {
+  const hasRegisteredPinnedCommand = pinnedCommandNames.has(command);
+  const hasManagedPinnedFile = isPinnedCommand(cwd, command);
+  const knownPinnedCommand = hasRegisteredPinnedCommand || hasManagedPinnedFile;
+  if (hasCommandFileConflict(cwd, command)) return true;
+
+  const commandFile = pinnedCommandPath(cwd, command);
+  const commands = pi.getCommands();
+  return commands.some((candidate) => {
+    if (candidate.name !== command) return false;
+    if (!knownPinnedCommand) return true;
+    if (
+      candidate.source === 'extension' &&
+      hasRegisteredPinnedCommand &&
+      candidate.description === pinnedCommandDescription(command)
+    )
+      return false;
+    if (
+      candidate.source === 'prompt' &&
+      candidate.path &&
+      hasManagedPinnedFile &&
+      resolve(candidate.path) === resolve(commandFile)
+    )
+      return false;
+    return true;
+  });
+}
+
+function hasCommandFileConflict(cwd: string, command: string) {
+  const file = pinnedCommandPath(cwd, command);
+  return existsSync(file) && !isPinnedCommandFile(file, command);
+}
+
+function isPinnedCommand(cwd: string, command: string) {
+  return (
+    isSafeCommandName(command) &&
+    isPinnedCommandFile(pinnedCommandPath(cwd, command), command)
+  );
+}
+
+function isPinnedCommandFile(file: string, command: string) {
+  try {
+    const content = readFileSync(file, 'utf8');
+    return (
+      content.includes('managed-by: omp-impeccable') &&
+      content.includes(`impeccable-command: ${command}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function pinnedCommandPath(cwd: string, command: string) {
+  return join(projectRoot(cwd), '.omp', 'commands', `${command}.md`);
+}
+
+function isSafeCommandName(command: string) {
+  if (command.length === 0 || command.length > 63) return false;
+  if (!isLowerAsciiLetter(command.charCodeAt(0))) return false;
+
+  for (let index = 1; index < command.length; index += 1) {
+    const charCode = command.charCodeAt(index);
+    if (
+      !isLowerAsciiLetter(charCode) &&
+      !isAsciiDigit(charCode) &&
+      command[index] !== '_' &&
+      command[index] !== '-'
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isLowerAsciiLetter(charCode: number) {
+  return charCode >= 97 && charCode <= 122;
+}
+
+function isAsciiDigit(charCode: number) {
+  return charCode >= 48 && charCode <= 57;
+}
+
+function pinnedCommandContent(command: string) {
+  return `---
+description: Run /impeccable ${command} through omp-impeccable
+managed-by: omp-impeccable
+impeccable-command: ${command}
+---
+Handle this Impeccable invocation in OMP: /impeccable ${command} $ARGUMENTS
+
+The omp-impeccable extension handles /${command} directly when loaded. This file keeps a native OMP command placeholder and safe fallback prompt.
+`;
+}
+
 function commandPrompt(args: string, skillRoot: string) {
   return [
-    `Handle this Impeccable invocation in Pi: /impeccable ${args.trim()}`,
+    `Handle this Impeccable invocation in OMP: /impeccable ${args.trim()}`,
     pathContract(skillRoot),
     `Start by reading ${join(skillRoot, 'SKILL.md')}.`,
     'If a sub-command is invoked, read the matching reference file from that skill root before acting.',
@@ -536,7 +796,7 @@ function pathContract(skillRoot: string) {
     'Use the Impeccable files installed by the upstream Impeccable package, not vendored extension files.',
     `Skill root: ${skillRoot}`,
     `Scripts: ${join(skillRoot, 'scripts')}`,
-    'Whenever Impeccable docs mention `node .agents/skills/impeccable/scripts/...`, run the matching script from `Scripts` instead.',
+    'Whenever upstream Impeccable docs mention `node .agents/skills/impeccable/scripts/...`, run the matching script from `Scripts` instead.',
   ].join('\n');
 }
 
@@ -614,14 +874,7 @@ function completions(prefix: string, cwd = process.cwd()) {
   const trimmedStart = prefix.trimStart();
   if (/\s/.test(trimmedStart)) return null;
   const descriptions = installedCommandDescriptions(cwd);
-  const commands = [
-    'live',
-    'status',
-    'stop',
-    'install',
-    'update',
-    ...agentCommands,
-  ];
+  const commands = [...extensionCommandDescriptions.keys(), ...agentCommands];
   const matches = commands.filter((command) =>
     command.startsWith(trimmedStart),
   );
@@ -688,7 +941,13 @@ function sendExtensionPrompt(
     ? { triggerTurn: true }
     : { triggerTurn: true, deliverAs: delivery };
   pi.sendMessage(
-    { customType: 'impeccable-command', content: text, display: false },
+    {
+      customType: 'impeccable-command',
+      content: text,
+      display: false,
+      details: undefined,
+      attribution: undefined,
+    },
     options,
   );
 }
@@ -708,7 +967,13 @@ function sendLiveEvent(
     ? { triggerTurn: true }
     : { triggerTurn: true, deliverAs: delivery };
   pi.sendMessage(
-    { customType: 'impeccable-live', content: text, display: false },
+    {
+      customType: 'impeccable-live',
+      content: text,
+      display: false,
+      details: undefined,
+      attribution: undefined,
+    },
     options,
   );
 }
@@ -724,7 +989,13 @@ function notifyOrDisplay(
 }
 
 function display(pi: ExtensionAPI, content: string) {
-  pi.sendMessage({ customType: 'impeccable', content, display: true });
+  pi.sendMessage({
+    customType: 'impeccable',
+    content,
+    display: true,
+    details: undefined,
+    attribution: undefined,
+  });
 }
 
 function clearTransientStatus(ctx?: ExtensionContext) {
@@ -736,10 +1007,7 @@ function clearTransientStatus(ctx?: ExtensionContext) {
 function showTransientStatus(ctx: ExtensionContext, text: string) {
   if (!ctx.hasUI) return;
   clearTransientStatus(ctx);
-  ctx.ui.setStatus(
-    'impeccable-transient',
-    ctx.ui.theme.fg('syntaxNumber', `✦ impeccable ${text}`),
-  );
+  ctx.ui.setStatus('impeccable-transient', `✦ impeccable ${text}`);
   transientStatusTimer = setTimeout(() => {
     transientStatusTimer = undefined;
     ctx.ui.setStatus('impeccable-transient', undefined);
@@ -764,15 +1032,7 @@ function stopIndicator(_live: LiveState, ctx?: ExtensionContext) {
 function renderIndicator(live: LiveState, ctx: ExtensionContext) {
   if (!ctx.hasUI) return;
   if (!live.active) return stopIndicator(live, ctx);
-  const label = (state: 'live' | 'event' | 'error') => {
-    const color =
-      state === 'live'
-        ? 'syntaxNumber'
-        : state === 'event'
-          ? 'warning'
-          : 'error';
-    return ctx.ui.theme.fg(color, `✦ impeccable ${state}`);
-  };
+  const label = (state: 'live' | 'event' | 'error') => `✦ impeccable ${state}`;
   if (live.pausedFor === 'poll-error' || live.pausedFor === 'parse-error') {
     ctx.ui.setStatus('impeccable', label('error'));
     return;
@@ -786,16 +1046,110 @@ function renderIndicator(live: LiveState, ctx: ExtensionContext) {
 
 // Files, processes, and JSON.
 function locateSkill(cwd: string) {
-  const root = projectRoot(cwd);
   const candidates = [
-    join(root, '.agents', 'skills', 'impeccable'),
+    projectOmpSkillRoot(cwd),
+    join(cwd, '.omp', 'skills', 'impeccable'),
+    join(homedir(), '.omp', 'agent', 'skills', 'impeccable'),
+    projectAgentsSkillRoot(cwd),
     join(cwd, '.agents', 'skills', 'impeccable'),
     join(homedir(), '.agents', 'skills', 'impeccable'),
   ];
-  return candidates.find(
-    (dir) =>
-      existsSync(join(dir, 'SKILL.md')) && existsSync(join(dir, 'scripts')),
-  );
+  return [...new Set(candidates)].find(isSkillRoot);
+}
+
+function ensureProjectOmpSkill(cwd: string) {
+  const skillRoot = projectOmpSkillRoot(cwd);
+  if (isSkillRoot(skillRoot)) return skillRoot;
+  const legacyRoot = projectAgentsSkillRoot(cwd);
+  if (isSkillRoot(legacyRoot)) return replaceProjectOmpSkill(legacyRoot, cwd);
+}
+
+async function installProjectOmpSkill(cwd: string) {
+  const stagingRoot = mkdtempSync(join(tmpdir(), 'omp-impeccable-install-'));
+  try {
+    mkdirSync(join(stagingRoot, '.git'));
+    const result = await runImpeccable(
+      [
+        'install',
+        '--providers=codex',
+        '--scope=project',
+        '-y',
+        '--no-hooks',
+        '--force',
+      ],
+      stagingRoot,
+      undefined,
+      120_000,
+    );
+    const skillRoot =
+      result.code === 0
+        ? replaceProjectOmpSkill(
+            join(stagingRoot, '.agents', 'skills', 'impeccable'),
+            cwd,
+          )
+        : undefined;
+    return { result, skillRoot };
+  } finally {
+    rmSync(stagingRoot, { recursive: true, force: true });
+  }
+}
+
+function replaceProjectOmpSkill(source: string, cwd: string) {
+  if (!isSkillRoot(source)) return undefined;
+
+  const dest = projectOmpSkillRoot(cwd);
+  rmSync(dest, { recursive: true, force: true });
+  mkdirSync(dirname(dest), { recursive: true });
+  cpSync(source, dest, { recursive: true });
+  rewriteSkillRootReferences(dest);
+  if (!isSkillRoot(dest)) return undefined;
+  return dest;
+}
+
+function rewriteSkillRootReferences(dir: string) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      rewriteSkillRootReferences(path);
+      continue;
+    }
+    if (!entry.isFile() || !isTextSkillFile(entry.name)) continue;
+
+    const content = readFileSync(path, 'utf8');
+    const next = content.replaceAll(
+      '.agents/skills/impeccable',
+      '.omp/skills/impeccable',
+    );
+    if (next !== content) writeFileSync(path, next);
+  }
+}
+
+const textSkillExtensions = new Set([
+  '.js',
+  '.json',
+  '.md',
+  '.mdx',
+  '.mjs',
+  '.txt',
+  '.ts',
+  '.yaml',
+  '.yml',
+]);
+
+function isTextSkillFile(file: string) {
+  return textSkillExtensions.has(extname(file));
+}
+
+function projectOmpSkillRoot(cwd: string) {
+  return join(projectRoot(cwd), '.omp', 'skills', 'impeccable');
+}
+
+function projectAgentsSkillRoot(cwd: string) {
+  return join(projectRoot(cwd), '.agents', 'skills', 'impeccable');
+}
+
+function isSkillRoot(dir: string) {
+  return existsSync(join(dir, 'SKILL.md')) && existsSync(join(dir, 'scripts'));
 }
 
 function projectRoot(cwd: string) {

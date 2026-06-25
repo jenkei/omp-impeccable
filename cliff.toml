@@ -2,17 +2,17 @@
 header = ""
 body = """
 {% if version == "v0.1.0" %}
-Initial public release of `pi-impeccable`.
+Initial public release of `omp-impeccable`.
 
-- Run Impeccable live mode from Pi without blocking the agent.
+- Run Impeccable live mode from OMP without blocking the agent.
 - Install and update the upstream Impeccable skill in `.agents/skills/impeccable`.
 - Deliver browser events to the agent in the background.
-- Show quiet live status as `✦ impeccable live`.
+- Show quiet live status while `/impeccable live` is running.
 {% endif %}
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | split(pat="\n") | first | trim }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/jordi9/pi-impeccable/commit/{{ commit.id }}))\
+- {{ commit.message | split(pat="\n") | first | trim }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/jenkei/omp-impeccable/commit/{{ commit.id }}))\
 {% endfor %}
 {% endfor %}
 """

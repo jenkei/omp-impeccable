@@ -1,32 +1,33 @@
-# pi-impeccable
+# omp-impeccable
 
-Run [Impeccable](https://impeccable.style/) skills from Pi without blocking the agent.
+Run Impeccable skills from OMP without blocking the agent.
 
 <p align="center">
-  <img src="docs/images/screenshot.jpg" alt="Impeccable live mode running in Pi" width="720">
+  <img src="docs/images/omp-impeccable.svg" alt="omp-impeccable: OMP bridge for Impeccable live mode" width="720">
 </p>
 
-`pi-impeccable` is a Pi extension for the incredible [`impeccable`](https://github.com/pbakaus/impeccable) package. It installs or updates the Impeccable skill in your project, then runs Impeccable live mode through Pi in the background.
+`omp-impeccable` is a native OMP plugin for the upstream [`impeccable`](https://github.com/pbakaus/impeccable) package. It installs or updates the Impeccable skill in your project, exposes `/impeccable` inside OMP, and runs Impeccable live mode in the background.
 
-That means you can keep chatting with the agent while Impeccable watches the browser, queues design feedback, and asks Pi to respond. No long-running `live-poll.mjs` command holds the shell hostage.
+That means you can keep chatting with the agent while Impeccable watches the browser, queues design feedback, and asks OMP to respond. No long-running `live-poll.mjs` command holds the shell hostage.
 
 ## Why use this?
 
-- **Non-blocking live mode** — `/impeccable live` starts the helper server and background poller, then immediately gives Pi back to you.
-- **Agent-native feedback loop** — browser events and Impeccable work arrive to the agent.
-- **Quiet status UI** — Pi shows `✦ impeccable live` while the background bridge is running.
-- **Upstream skill, no vendoring** — the extension uses the official `impeccable` package to install/update `.agents/skills/impeccable` in your project.
+- **Native OMP plugin manifest** — package metadata uses `omp.extensions`, so `omp plugin install` loads it directly.
+- **Non-blocking live mode** — `/impeccable live` starts the helper server and background poller, then immediately returns control to OMP.
+- **Agent-native feedback loop** — browser events and Impeccable work arrive as hidden OMP extension messages.
+- **Quiet status UI** — OMP shows a compact `impeccable live` status while the background bridge is running.
+- **Upstream skill, no vendoring** — the plugin uses the official `impeccable` package to install/update the upstream Codex skill, relocates the managed copy to `.omp/skills/impeccable`, then publishes that skill path through OMP resource discovery.
 
 ## Install
 
 ```bash
-pi install npm:pi-impeccable
+omp plugin install omp-impeccable
 ```
 
-Local testing:
+Local testing from this checkout:
 
 ```bash
-pi -e ./pi-impeccable
+omp -e ./extensions/impeccable.ts
 ```
 
 ## Use
@@ -34,11 +35,11 @@ pi -e ./pi-impeccable
 Install or update the upstream Impeccable skill:
 
 ```text
-/impeccable install              # installs latest upstream skill into .agents/skills/impeccable
+/impeccable install              # installs latest upstream skill into .omp/skills/impeccable
 /impeccable update               # updates that skill from upstream
 ```
 
-Run Impeccable skills from Pi. `pi-impeccable` exposes the skills in one command with arguments. Some example commands:
+Run Impeccable skills from OMP. `omp-impeccable` exposes the skills in one command with arguments. Some example commands:
 
 ```text
 /impeccable init
@@ -48,7 +49,15 @@ Run Impeccable skills from Pi. `pi-impeccable` exposes the skills in one command
 /impeccable polish src/components/Header.tsx
 ```
 
-Check [Impeccable docs](https://impeccable.style/docs/) to see the options.
+Check [Impeccable docs](https://impeccable.style/docs/) to see the options. The upstream `pin`, `unpin`, and `hooks` commands are adapted for OMP:
+
+```text
+/impeccable pin audit       # creates a native /audit shortcut in .omp/commands/audit.md
+/impeccable unpin audit     # removes that shortcut file
+/impeccable hooks           # explains why upstream hook manifests are not installed for OMP
+```
+
+Pinned shortcuts are handled by the plugin when it is loaded. The `.omp/commands/*.md` file is also a native OMP fallback prompt, so the project still documents the shortcut.
 
 Start the non-blocking live loop:
 
@@ -56,7 +65,7 @@ Start the non-blocking live loop:
 /impeccable live
 ```
 
-While live mode is running, Pi remains usable. Impeccable events are delivered in the background, and the agent can reply through `impeccable_live_reply` / `impeccable_live_complete` without exposing the polling loop as a foreground task.
+While live mode is running, OMP remains usable. Impeccable events are delivered in the background, and the agent can reply through `impeccable_live_reply` / `impeccable_live_complete` without exposing the polling loop as a foreground task.
 
 Check or stop live mode:
 
@@ -68,31 +77,27 @@ Check or stop live mode:
 
 You can also say `stop live` to stop it quietly.
 
+
+## Attribution
+
+This plugin is an OMP-native fork of [`pi-impeccable`](https://github.com/jordi9/pi-impeccable) by jordi9. The upstream Impeccable package and skill are created by [Paul Bakaus](https://github.com/pbakaus) and live at [`pbakaus/impeccable`](https://github.com/pbakaus/impeccable). This repository is only the OMP adapter; it does not vendor Impeccable.
+
 ## Release
 
 Releases are tag-driven:
 
-1. `jj` owns the working-copy commit and `main` bookmark.
-2. `git` owns release tags.
-3. GitHub Actions publishes to npm, generates release notes with `git-cliff`, and creates the GitHub Release.
-
-First release:
+1. Bump `package.json`.
+2. Update `CHANGELOG.md`.
+3. Run release checks.
+4. Push `main`, then create and push the matching Git tag.
 
 ```bash
 pnpm release:check
-
-git-cliff --unreleased --tag v0.1.0   # optional release-notes preview
-
-jj describe -m "chore: prepare v0.1.0 release"
-jj bookmark move main -r @
-jj git push 
-
+git-cliff --unreleased --tag v0.1.0
 git tag v0.1.0 main
-git push origin v0.1.0                # publishes to npm and creates the GitHub Release
+git push origin main v0.1.0
 ```
-
-Later releases use the same flow: bump `package.json`, update `CHANGELOG.md`, preview notes with `git-cliff --unreleased --tag vX.Y.Z`, push `main`, then create and push the matching Git tag.
 
 ## License
 
-Apache-2.0 as Impeccable.
+Apache-2.0, matching upstream Impeccable.

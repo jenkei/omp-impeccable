@@ -1,26 +1,26 @@
 {
-  "name": "pi-impeccable",
+  "name": "omp-impeccable",
   "version": "0.1.0",
-  "description": "Run Impeccable skills from Pi without blocking the agent.",
+  "description": "Run Impeccable skills from OMP without blocking the agent.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jordi9/pi-impeccable.git"
+    "url": "git+https://github.com/jenkei/omp-impeccable.git"
   },
   "bugs": {
-    "url": "https://github.com/jordi9/pi-impeccable/issues"
+    "url": "https://github.com/jenkei/omp-impeccable/issues"
   },
-  "homepage": "https://github.com/jordi9/pi-impeccable#readme",
+  "homepage": "https://github.com/jenkei/omp-impeccable#readme",
   "keywords": [
-    "pi-package",
-    "pi-extension",
+    "omp-plugin",
+    "omp",
     "impeccable",
     "design"
   ],
   "files": [
     "extensions/",
-    "docs/images/screenshot.jpg",
+    "docs/images/omp-impeccable.svg",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -28,19 +28,22 @@
   "engines": {
     "node": ">=24"
   },
-  "pi": {
+  "omp": {
+    "name": "Impeccable for OMP",
+    "description": "Run Impeccable skills from OMP without blocking the agent.",
     "extensions": [
       "./extensions/impeccable.ts"
-    ],
-    "image": "https://unpkg.com/pi-impeccable/docs/images/screenshot.jpg"
+    ]
   },
   "dependencies": {
     "impeccable": "*"
   },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+  "devDependencies": {
+    "@biomejs/biome": "2.5.0",
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@types/node": "24.13.2",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9"
   },
   "scripts": {
     "test": "vitest run",
@@ -51,11 +54,5 @@
     "pack:check": "npm pack --dry-run",
     "release:check": "pnpm check && pnpm pack:check"
   },
-  "packageManager": "pnpm@11.8.0+sha512.c1f5e7c4cb241c8f174b743851d82f42b802324afc8b0f116b96adb15aa06664948dde36960a3ba1079ba5b4b29dd0140135b94b5b5f5263592249d68e555f26",
-  "devDependencies": {
-    "@biomejs/biome": "2.5.0",
-    "@types/node": "24.13.2",
-    "typescript": "6.0.3",
-    "vitest": "^4.1.9"
-  }
+  "packageManager": "pnpm@11.8.0+sha512.c1f5e7c4cb241c8f174b743851d82f42b802324afc8b0f116b96adb15aa06664948dde36960a3ba1079ba5b4b29dd0140135b94b5b5f5263592249d68e555f26"
 }

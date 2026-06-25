@@ -1,4 +1,6 @@
 allowBuilds:
   '@google/genai': false
+  onnxruntime-node: false
   protobufjs: false
   puppeteer: false
+  sharp: false

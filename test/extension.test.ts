@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +7,7 @@ import type {
   ExtensionContext,
   RegisteredCommand,
   ToolDefinition,
-} from '@earendil-works/pi-coding-agent';
+} from '@oh-my-pi/pi-coding-agent/extensibility/extensions/types';
 import { describe, expect, onTestFinished, test } from 'vitest';
 
 import impeccableExtension, {
@@ -19,50 +18,51 @@ import impeccableExtension, {
 const root = path.resolve(import.meta.dirname, '..');
 
 describe('impeccable extension', () => {
-  test('package exposes the pi extension without vendoring Impeccable', () => {
+  test('package exposes the OMP extensions without vendoring Impeccable', () => {
     const pkg = readPackageJson();
 
-    expect(pkg.pi.extensions).toEqual(['./extensions/impeccable.ts']);
+    expect(pkg.omp.extensions).toEqual(['./extensions/impeccable.ts']);
     expect(pkg.dependencies.impeccable).toBe('*');
-    expect(fs.existsSync(path.join(root, 'vendor'))).toBe(false);
+    for (const excluded of [
+      '.omp/skills',
+      '.agents/skills',
+      '.github/skills',
+      'vendor',
+    ]) {
+      expect(pkg.files).not.toContain(excluded);
+    }
   });
 
-  test('loads through pi --extension and handles /impeccable help', () => {
-    const pi = path.join(root, 'node_modules', '.bin', 'pi');
-    const result = spawnSync(
-      pi,
-      [
-        '-p',
-        '--mode',
-        'json',
-        '--offline',
-        '--no-session',
-        '--no-tools',
-        '--no-skills',
-        '--no-prompt-templates',
-        '--no-context-files',
-        '--no-extensions',
-        '-e',
-        './extensions/impeccable.ts',
-        '/impeccable help',
-      ],
-      { cwd: root, encoding: 'utf8' },
-    );
+  test('help renders OMP-native command usage', async () => {
+    const harness = loadExtension();
+    const ctx = makeContext(root);
 
-    expect(result.status, result.stderr || result.stdout).toBe(0);
-    const help = parsePiEvents(result.stdout).find(
-      (event) =>
-        event.type === 'message_end' &&
-        event.message?.customType === 'impeccable',
-    );
+    await runCommand(harness, 'help', ctx);
 
-    expect(help?.message?.content ?? '').toMatch(
+    const help = harness.messages.find(
+      (entry) => entry.message.customType === 'impeccable',
+    );
+    expect(help?.message.content ?? '').toMatch(
       /Usage:\n\/impeccable <command>/,
     );
+    expect(help?.message.content ?? '').toContain('/impeccable hooks');
+    expect(help?.message.content ?? '').toContain('OMP commands:');
+    expect(help?.message.content ?? '').toContain('does not vendor Impeccable');
   });
 
-  test('resources_discover publishes an installed project skill path', async () => {
+  test('resources_discover publishes the installed project OMP skill path', async () => {
     const { project, skillRoot } = makeProject();
+    const legacySkillRoot = path.join(
+      project,
+      '.agents',
+      'skills',
+      'impeccable',
+    );
+    fs.mkdirSync(path.join(legacySkillRoot, 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(legacySkillRoot, 'SKILL.md'),
+      '# legacy impeccable\n',
+    );
     const nested = path.join(project, 'src', 'pages');
     fs.mkdirSync(nested, { recursive: true });
     const harness = loadExtension();
@@ -72,7 +72,40 @@ describe('impeccable extension', () => {
       { cwd: nested },
     );
 
+    expect(skillRoot).toBe(path.join(project, '.omp', 'skills', 'impeccable'));
     expect(result).toEqual({ skillPaths: [skillRoot] });
+    expect(result?.skillPaths).not.toContain(legacySkillRoot);
+  });
+
+  test('agent commands copy a legacy project .agents skill into .omp', async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-impeccable-'));
+    const legacySkillRoot = path.join(
+      project,
+      '.agents',
+      'skills',
+      'impeccable',
+    );
+    const skillRoot = path.join(project, '.omp', 'skills', 'impeccable');
+    fs.mkdirSync(path.join(project, '.git'));
+    fs.mkdirSync(path.join(legacySkillRoot, 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(legacySkillRoot, 'SKILL.md'),
+      'Run `node .agents/skills/impeccable/scripts/live-poll.mjs`.\n',
+    );
+    onTestFinished(() => fs.rmSync(project, { recursive: true, force: true }));
+    const harness = loadExtension();
+    const ctx = makeContext(project, { idle: false });
+
+    await runCommand(harness, 'audit src/App.tsx', ctx);
+
+    expect(fs.existsSync(path.join(skillRoot, 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(legacySkillRoot)).toBe(true);
+    expect(fs.readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8')).toContain(
+      '.omp/skills/impeccable/scripts/live-poll.mjs',
+    );
+    expect(harness.messages[0]?.message.content).toMatch(
+      new RegExp(escapeRegExp(skillRoot)),
+    );
   });
 
   test('argument completions prefer installed command metadata', async () => {
@@ -117,9 +150,9 @@ describe('impeccable extension', () => {
 
   test('argument completions include fallback descriptions before skill install', async () => {
     const project = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'pi-impeccable-no-skill-'),
+      path.join(os.tmpdir(), 'omp-impeccable-no-skill-'),
     );
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-impeccable-home-'));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-impeccable-home-'));
     const oldHome = process.env.HOME;
     fs.mkdirSync(path.join(project, '.git'));
     process.env.HOME = home;
@@ -141,7 +174,226 @@ describe('impeccable extension', () => {
     );
 
     expect(craft?.description).toMatch(/confirmed-brief-then-build/);
-    expect(hooks?.description).toMatch(/design detector hook/);
+    expect(hooks?.description).toMatch(/upstream hook manifests/);
+  });
+
+  test('pin creates an OMP command shortcut handled by the extension', async () => {
+    const { project, skillRoot } = makeProject();
+    const harness = loadExtension();
+    const ctx = makeContext(project, { idle: false });
+
+    await runCommand(harness, 'pin audit', ctx);
+    await runCommand(harness, 'pin audit', ctx);
+    await harness.commands.get('audit')?.handler('src/App.tsx', ctx);
+
+    const shortcut = fs.readFileSync(
+      path.join(project, '.omp', 'commands', 'audit.md'),
+      'utf8',
+    );
+    const [entry] = harness.messages;
+
+    expect(shortcut).toContain('managed-by: omp-impeccable');
+    expect(shortcut).toContain('impeccable-command: audit');
+    expect(shortcut).toContain('$ARGUMENTS');
+    expect(entry?.message.customType).toBe('impeccable-command');
+    expect(entry?.message.content).toMatch(
+      /Handle this Impeccable invocation in OMP: \/impeccable audit src\/App\.tsx/,
+    );
+    expect(entry?.message.content).toMatch(new RegExp(escapeRegExp(skillRoot)));
+  });
+
+  test('pin resolves OMP command shortcuts from the project root', async () => {
+    const { project, skillRoot } = makeProject();
+    const nested = path.join(project, 'src', 'pages');
+    fs.mkdirSync(nested, { recursive: true });
+    const ctx = makeContext(nested, { idle: false });
+
+    await runCommand(loadExtension(), 'pin audit', ctx);
+
+    const shortcut = path.join(project, '.omp', 'commands', 'audit.md');
+    expect(fs.existsSync(shortcut)).toBe(true);
+    expect(
+      fs.existsSync(path.join(nested, '.omp', 'commands', 'audit.md')),
+    ).toBe(false);
+
+    const oldCwd = process.cwd();
+    onTestFinished(() => process.chdir(oldCwd));
+    process.chdir(nested);
+    const harness = loadExtension();
+    expect(harness.commands.has('audit')).toBe(true);
+    await harness.commands.get('audit')?.handler('src/App.tsx', ctx);
+
+    const [entry] = harness.messages;
+    expect(entry?.message.customType).toBe('impeccable-command');
+    expect(entry?.message.content).toMatch(
+      /Handle this Impeccable invocation in OMP: \/impeccable audit src\/App\.tsx/,
+    );
+    expect(entry?.message.content).toMatch(new RegExp(escapeRegExp(skillRoot)));
+  });
+
+  test('factory restore does not require initialized getCommands', () => {
+    const { project } = makeProject();
+    const nested = path.join(project, 'src', 'pages');
+    const auditFile = path.join(project, '.omp', 'commands', 'audit.md');
+    fs.mkdirSync(path.dirname(auditFile), { recursive: true });
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(
+      auditFile,
+      `---
+description: Run /impeccable audit through omp-impeccable
+managed-by: omp-impeccable
+impeccable-command: audit
+---
+`,
+    );
+    const oldCwd = process.cwd();
+    onTestFinished(() => process.chdir(oldCwd));
+    process.chdir(nested);
+
+    const harness = loadExtension([], { getCommandsUnavailable: true });
+
+    expect(harness.commands.has('audit')).toBe(true);
+  });
+
+  test('pin refuses slash commands owned by another extension', async () => {
+    const { project } = makeProject();
+    const harness = loadExtension();
+    const ctx = makeContext(project);
+    harness.commands.set('audit', {
+      description: 'Run another extension audit command',
+      handler: () => undefined,
+    });
+
+    await runCommand(harness, 'pin audit', ctx);
+
+    expect(ctx.ui.notifications.at(-1)).toEqual({
+      message:
+        'Cannot pin /audit; an OMP slash command with that name already exists.',
+      type: 'warning',
+    });
+    expect(
+      fs.existsSync(path.join(project, '.omp', 'commands', 'audit.md')),
+    ).toBe(false);
+  });
+
+  test('pin refuses a pre-existing non-managed OMP command file', async () => {
+    const { project } = makeProject();
+    const harness = loadExtension();
+    const ctx = makeContext(project);
+    const file = path.join(project, '.omp', 'commands', 'audit.md');
+    const existing = `---
+description: Existing audit command
+---
+Existing /audit command
+`;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, existing);
+
+    await runCommand(harness, 'pin audit', ctx);
+
+    expect(ctx.ui.notifications.at(-1)).toEqual({
+      message: `Cannot overwrite existing OMP command file: ${file}`,
+      type: 'warning',
+    });
+    expect(fs.readFileSync(file, 'utf8')).toBe(existing);
+    expect(harness.commands.has('audit')).toBe(false);
+  });
+
+  test('pin accepts its managed OMP command file on reload', async () => {
+    const { project } = makeProject();
+    const ctx = makeContext(project);
+    const file = path.join(project, '.omp', 'commands', 'audit.md');
+
+    await runCommand(loadExtension(), 'pin audit', ctx);
+
+    const harness = loadExtension([
+      {
+        name: 'audit',
+        description: 'Run /impeccable audit through omp-impeccable',
+        source: 'prompt',
+        location: 'project',
+        path: file,
+      },
+    ]);
+    await harness.emit('session_start', {}, ctx);
+    expect(harness.commands.has('audit')).toBe(true);
+
+    await runCommand(harness, 'pin audit', ctx);
+
+    expect(ctx.ui.notifications.at(-1)).toEqual({
+      message: 'Pinned /audit to /impeccable audit in .omp/commands/audit.md.',
+      type: 'info',
+    });
+  });
+
+  test('restore skips non-managed command sources and command files', async () => {
+    const { project } = makeProject();
+    const ctx = makeContext(project);
+    const auditFile = path.join(project, '.omp', 'commands', 'audit.md');
+    const craftFile = path.join(project, '.omp', 'commands', 'craft.md');
+    const foreignAuditFile = path.join(
+      project,
+      '.omp',
+      'commands',
+      'foreign-audit.md',
+    );
+
+    fs.mkdirSync(path.dirname(auditFile), { recursive: true });
+    fs.writeFileSync(
+      auditFile,
+      `---
+description: Run /impeccable audit through omp-impeccable
+managed-by: omp-impeccable
+impeccable-command: audit
+---
+`,
+    );
+    fs.writeFileSync(
+      craftFile,
+      `---
+description: Existing craft command
+---
+Existing /craft command
+`,
+    );
+    fs.writeFileSync(
+      foreignAuditFile,
+      `---
+description: Existing audit command
+---
+Existing /audit command
+`,
+    );
+
+    const harness = loadExtension([
+      {
+        name: 'audit',
+        description: 'Run an existing prompt audit command',
+        source: 'prompt',
+        location: 'project',
+        path: foreignAuditFile,
+      },
+    ]);
+
+    await harness.emit('session_start', {}, ctx);
+
+    expect(harness.commands.has('audit')).toBe(false);
+    expect(harness.commands.has('craft')).toBe(false);
+    expect(harness.messages).toHaveLength(0);
+  });
+
+  test('hooks explains OMP-native live mode instead of installing upstream hook manifests', async () => {
+    const { project } = makeProject();
+    const harness = loadExtension();
+    const ctx = makeContext(project);
+
+    await runCommand(harness, 'hooks', ctx);
+
+    expect(ctx.ui.notifications.at(-1)).toEqual({
+      message:
+        'The upstream /impeccable hooks command installs provider-specific hook manifests. omp-impeccable does not install those; use /impeccable live for OMP-native design feedback.',
+      type: 'info',
+    });
   });
 
   test('agent commands are queued as hidden extension messages', async () => {
@@ -157,9 +409,10 @@ describe('impeccable extension', () => {
     expect(entry?.message.display).toBe(false);
     expect(entry?.options?.deliverAs).toBe('followUp');
     expect(entry?.message.content).toMatch(
-      /Handle this Impeccable invocation in Pi: \/impeccable audit src\/App\.tsx/,
+      /Handle this Impeccable invocation in OMP: \/impeccable audit src\/App\.tsx/,
     );
     expect(entry?.message.content).toMatch(new RegExp(escapeRegExp(skillRoot)));
+    expect(entry?.message.content).toContain('not vendored extension files');
     expect(
       ctx.ui.statuses.some(
         (status) => status.value === '✦ impeccable audit queued',
@@ -197,7 +450,7 @@ describe('impeccable extension', () => {
       id: 'evt-1',
       prompt: 'Make the hero sharper',
     };
-    const { project } = makeProject({
+    const { project, skillRoot } = makeProject({
       'live.mjs': 'console.log(JSON.stringify({ ok: true }));\n',
       'live-poll.mjs': `console.log(${JSON.stringify(JSON.stringify(event))});\n`,
     });
@@ -205,6 +458,12 @@ describe('impeccable extension', () => {
     const ctx = makeContext(project, { idle: false });
 
     await runCommand(harness, 'live --delivery=followUp', ctx);
+    expect(
+      ctx.ui.statuses.some(
+        (status) =>
+          status.key === 'impeccable' && status.value === '✦ impeccable live',
+      ),
+    ).toBe(true);
     await waitFor(
       () =>
         harness.messages.some(
@@ -225,6 +484,9 @@ describe('impeccable extension', () => {
     expect(liveMessage?.message.content).toMatch(
       /call impeccable_live_reply with id "evt-1"/,
     );
+    expect(liveMessage?.message.content).toContain(
+      `Scripts: ${path.join(skillRoot, 'scripts')}`,
+    );
     expect(
       ctx.ui.notifications.find((note) => /live started/.test(note.message)),
     ).toEqual({
@@ -237,7 +499,7 @@ describe('impeccable extension', () => {
   test('session shutdown stops live server and ignores killed polls', async () => {
     const stopArgs = path.join(
       os.tmpdir(),
-      `pi-impeccable-stop-${process.pid}.json`,
+      `omp-impeccable-stop-${process.pid}.json`,
     );
     onTestFinished(() => fs.rmSync(stopArgs, { force: true }));
     const { project } = makeProject({
@@ -271,7 +533,7 @@ describe('impeccable extension', () => {
       {
         toolName: 'bash',
         input: {
-          command: 'node .agents/skills/impeccable/scripts/live-poll.mjs',
+          command: 'node .omp/skills/impeccable/scripts/live-poll.mjs',
         },
       },
       ctx,
@@ -282,7 +544,7 @@ describe('impeccable extension', () => {
         toolName: 'bash',
         input: {
           command:
-            'node .agents/skills/impeccable/scripts/live-poll.mjs --reply evt done',
+            'node .omp/skills/impeccable/scripts/live-poll.mjs --reply evt done',
         },
       },
       ctx,
@@ -290,33 +552,42 @@ describe('impeccable extension', () => {
 
     expect(blocked?.block).toBe(true);
     expect(blocked?.reason).toMatch(
-      /managed by the pi-impeccable extension in the background/,
+      /managed by the omp-impeccable extension in the background/,
     );
     expect(reply).toBeUndefined();
   });
 
-  test('reply and complete tools call upstream scripts with the expected args', async () => {
+  test('reply and complete tools call OMP skill scripts with the expected args', async () => {
     const replyArgs = path.join(
       os.tmpdir(),
-      `pi-impeccable-reply-${process.pid}.json`,
+      `omp-impeccable-reply-${process.pid}.json`,
     );
     const completeArgs = path.join(
       os.tmpdir(),
-      `pi-impeccable-complete-${process.pid}.json`,
+      `omp-impeccable-complete-${process.pid}.json`,
     );
     onTestFinished(() => {
       fs.rmSync(replyArgs, { force: true });
       fs.rmSync(completeArgs, { force: true });
     });
-    const { project } = makeProject({
+    const { project, skillRoot } = makeProject({
       'live-poll.mjs': `
 				import fs from 'node:fs';
-				if (process.argv.includes('--reply')) fs.writeFileSync(${JSON.stringify(replyArgs)}, JSON.stringify(process.argv.slice(2)));
-				else console.log(JSON.stringify({ type: 'exit' }));
+				if (process.argv.includes('--reply')) {
+					fs.writeFileSync(
+						${JSON.stringify(replyArgs)},
+						JSON.stringify({ script: process.argv[1], args: process.argv.slice(2) }),
+					);
+				} else {
+					console.log(JSON.stringify({ type: 'exit' }));
+				}
 			`,
       'live-complete.mjs': `
 				import fs from 'node:fs';
-				fs.writeFileSync(${JSON.stringify(completeArgs)}, JSON.stringify(process.argv.slice(2)));
+				fs.writeFileSync(
+					${JSON.stringify(completeArgs)},
+					JSON.stringify({ script: process.argv[1], args: process.argv.slice(2) }),
+				);
 			`,
     });
     const harness = loadExtension();
@@ -349,7 +620,14 @@ describe('impeccable extension', () => {
 
     expect(reply.content[0]?.text).toMatch(/resumed polling/);
     expect(complete.content[0]?.text).toMatch(/resumed polling/);
-    expect(JSON.parse(fs.readFileSync(replyArgs, 'utf8'))).toEqual([
+    const replyInvocation = JSON.parse(fs.readFileSync(replyArgs, 'utf8'));
+    const completeInvocation = JSON.parse(
+      fs.readFileSync(completeArgs, 'utf8'),
+    );
+    expect(replyInvocation.script).toBe(
+      path.join(skillRoot, 'scripts', 'live-poll.mjs'),
+    );
+    expect(replyInvocation.args).toEqual([
       '--reply',
       'evt-1',
       'done',
@@ -359,7 +637,10 @@ describe('impeccable extension', () => {
       '{"ok":true}',
       'Looks good',
     ]);
-    expect(JSON.parse(fs.readFileSync(completeArgs, 'utf8'))).toEqual([
+    expect(completeInvocation.script).toBe(
+      path.join(skillRoot, 'scripts', 'live-complete.mjs'),
+    );
+    expect(completeInvocation.args).toEqual([
       '--id',
       'session-1',
       '--discarded',
@@ -410,17 +691,12 @@ type LiveStatus = {
 };
 
 type PackageJson = {
-  pi: { extensions: string[] };
+  omp: { extensions: string[] };
   dependencies: Record<string, string>;
+  files: string[];
 };
 
-type PiJsonEvent = {
-  type?: string;
-  message?: {
-    customType?: string;
-    content?: string;
-  };
-};
+type SlashCommandInfo = ReturnType<ExtensionAPI['getCommands']>[number];
 
 type ProjectFixture = {
   project: string;
@@ -511,12 +787,31 @@ function impeccableCommand(harness: Harness): TestCommand {
   return command;
 }
 
-function loadExtension(): Harness {
+function loadExtension(
+  extraCommands: SlashCommandInfo[] = [],
+  { getCommandsUnavailable = false }: { getCommandsUnavailable?: boolean } = {},
+): Harness {
   const handlers = new Map<string, EventHandler[]>();
   const commands = new Map<string, TestCommand>();
   const tools = new Map<string, ToolDefinition>();
   const messages: SentMessage[] = [];
-  const pi = {
+  const schema = () => ({
+    describe() {
+      return this;
+    },
+    optional() {
+      return this;
+    },
+  });
+  const z = {
+    object: (shape: unknown) => ({ shape }),
+    string: schema,
+    enum: schema,
+    boolean: schema,
+    any: schema,
+  };
+  const api = {
+    zod: { z },
     on(name: string, handler: EventHandler) {
       const list = handlers.get(name) ?? [];
       list.push(handler);
@@ -534,8 +829,19 @@ function loadExtension(): Harness {
     ) {
       messages.push({ message, options });
     },
+    getCommands() {
+      if (getCommandsUnavailable) throw new Error('getCommands unavailable');
+      return [
+        ...[...commands.entries()].map(([name, command]) => ({
+          name,
+          description: command.description,
+          source: 'extension' as const,
+        })),
+        ...extraCommands,
+      ];
+    },
   };
-  impeccableExtension(pi as unknown as ExtensionAPI);
+  impeccableExtension(api as unknown as ExtensionAPI);
 
   return {
     handlers,
@@ -578,8 +884,8 @@ function makeContext(
 }
 
 function makeProject(scripts: Record<string, string> = {}): ProjectFixture {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-impeccable-'));
-  const skillRoot = path.join(project, '.agents', 'skills', 'impeccable');
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-impeccable-'));
+  const skillRoot = path.join(project, '.omp', 'skills', 'impeccable');
   fs.mkdirSync(path.join(project, '.git'));
   fs.mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(skillRoot, 'SKILL.md'), '# fake impeccable\n');
@@ -588,14 +894,6 @@ function makeProject(scripts: Record<string, string> = {}): ProjectFixture {
   }
   onTestFinished(() => fs.rmSync(project, { recursive: true, force: true }));
   return { project, skillRoot };
-}
-
-function parsePiEvents(stdout: string): PiJsonEvent[] {
-  return stdout
-    .trim()
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as PiJsonEvent);
 }
 
 function readPackageJson(): PackageJson {
