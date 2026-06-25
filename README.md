@@ -84,18 +84,27 @@ This plugin is an OMP-native fork of [`pi-impeccable`](https://github.com/jordi9
 
 ## Release
 
-Releases are tag-driven:
+Publish the npm package from your machine first; GitHub Actions only creates the GitHub Release after the tag is pushed:
 
-1. Bump `package.json`.
-2. Update `CHANGELOG.md`.
-3. Run release checks.
-4. Push `main`, then create and push the matching Git tag.
+1. Bump the `package.json` version, for example with `npm version X.Y.Z --no-git-tag-version`.
+2. Update `CHANGELOG.md`, for example with `git-cliff --unreleased --tag vX.Y.Z`.
+3. Run `pnpm release:check`.
+4. Publish to npm locally with `npm publish --access public`.
+5. Commit the version and changelog changes, then push `main`.
+6. Create and push the matching Git tag: `git tag vX.Y.Z main && git push origin main vX.Y.Z`.
+7. GitHub Actions creates the GitHub Release from the tag using `git-cliff` notes.
+
+Example:
 
 ```bash
+npm version X.Y.Z --no-git-tag-version
+git-cliff --unreleased --tag vX.Y.Z
 pnpm release:check
-git-cliff --unreleased --tag v0.1.0
-git tag v0.1.0 main
-git push origin main v0.1.0
+npm publish --access public
+git add package.json CHANGELOG.md
+git commit
+git push origin main
+git tag vX.Y.Z main && git push origin main vX.Y.Z
 ```
 
 ## License
